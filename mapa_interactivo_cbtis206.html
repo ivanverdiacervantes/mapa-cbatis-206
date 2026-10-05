@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mapa interactivo CBTis 206</title>
+<style>
+:root{
+  --wine:#5b2630; --wine2:#7b3945; --cream:#fffaf3;
+  --ink:#202124; --muted:#6b7280; --line:#ddd6cc;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f4f1ec;color:var(--ink)}
+header{background:linear-gradient(135deg,var(--wine),#3d1a21);color:white;padding:18px 18px 16px}
+header h1{margin:0;font-size:clamp(22px,5vw,34px)}
+header p{margin:5px 0 0;opacity:.88}
+.app{max-width:1200px;margin:auto;padding:14px}
+.toolbar{display:grid;grid-template-columns:1fr auto auto;gap:9px;margin-bottom:10px}
+input,select,button{font:inherit}
+input,select{border:1px solid var(--line);background:white;border-radius:12px;padding:11px 12px;outline:none}
+button{border:0;border-radius:12px;padding:11px 14px;background:var(--wine);color:#fff;font-weight:700;cursor:pointer}
+button.secondary{background:white;color:var(--wine);border:1px solid var(--line)}
+.card{background:white;border:1px solid var(--line);border-radius:18px;box-shadow:0 5px 22px #0000000d;overflow:hidden}
+.mapwrap{position:relative;height:min(72vh,720px);min-height:500px;overflow:hidden;background:#e9e1d7;touch-action:none}
+#map{width:100%;height:100%;display:block;cursor:grab}
+#map.dragging{cursor:grabbing}
+.legend{display:flex;gap:7px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--line);font-size:13px}
+.legend span{padding:6px 9px;border-radius:999px;background:#f4f0eb}
+.info{margin-top:12px;padding:16px}
+.info h2{margin:0 0 4px;color:var(--wine)}
+.info p{margin:7px 0;color:#444}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.tag{background:#f5e9eb;color:var(--wine);padding:5px 8px;border-radius:999px;font-size:12px}
+.small{font-size:12px;color:var(--muted)}
+.controls{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:6px}
+.controls button{width:42px;height:42px;padding:0;background:#fff;color:var(--wine);box-shadow:0 3px 12px #0002;font-size:20px}
+.searchresults{position:absolute;left:14px;top:67px;background:white;border-radius:12px;box-shadow:0 8px 25px #0003;max-width:380px;width:calc(100% - 28px);display:none;z-index:5;overflow:hidden}
+.result{padding:11px 13px;border-bottom:1px solid #eee;cursor:pointer}
+.result:hover{background:#faf4f5}
+.notice{margin-top:10px;background:#fff8e8;border:1px solid #ead7a5;border-radius:12px;padding:10px 12px;font-size:12px;color:#6b5530}
+@media(max-width:700px){
+ .toolbar{grid-template-columns:1fr 1fr}
+ .toolbar input{grid-column:1/-1}
+ .mapwrap{min-height:520px;height:65vh}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>🗺️ CBTis 206 · Mapa interactivo</h1>
+  <p>Guía rápida para alumnos de nuevo ingreso</p>
+</header>
+
+<main class="app">
+  <div class="toolbar">
+    <input id="search" placeholder="🔎 Buscar: Control Escolar, Electricidad, aula J1..." autocomplete="off">
+    <button class="secondary" id="reset">⟳ Restablecer</button>
+    <button id="routeBtn">🧭 ¿Cómo llegar?</button>
+  </div>
+
+  <div class="card">
+    <div class="mapwrap" id="mapwrap">
+      <svg id="map" viewBox="0 0 1200 850" aria-label="Mapa esquemático del CBTis 206">
+        <defs>
+          <filter id="shadow"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-opacity=".18"/></filter>
+          <pattern id="grass" width="28" height="28" patternUnits="userSpaceOnUse">
+            <rect width="28" height="28" fill="#dce7d5"/>
+            <path d="M4 24l4-8M18 25l3-7M12 12l2-5" stroke="#b9cfad" stroke-width="2" opacity=".6"/>
+          </pattern>
+        </defs>
+        <rect width="1200" height="850" fill="url(#grass)"/>
+        <path d="M0 700 C250 650 430 750 650 700 S1000 650 1200 690 L1200 850H0Z" fill="#ddd2c4"/>
+        <path d="M0 735 H1200" stroke="#c4b7a7" stroke-width="5"/>
+        <text x="600" y="825" text-anchor="middle" font-size="20" fill="#6f655c">Acceso / zona exterior</text>
+
+        <!-- Caminos principales -->
+        <path d="M1050 770 C930 700 900 600 820 520 S700 390 620 300 S530 190 440 150" fill="none" stroke="#c8b9a8" stroke-width="42" stroke-linecap="round"/>
+        <path d="M180 740 C270 650 300 560 340 480 S430 360 500 280" fill="none" stroke="#c8b9a8" stroke-width="30" stroke-linecap="round"/>
+        <path d="M900 750 C790 690 650 690 520 690 S340 670 200 650" fill="none" stroke="#c8b9a8" stroke-width="28" stroke-linecap="round"/>
+
+        <!-- cancha -->
+        <g>
+          <rect x="65" y="480" width="205" height="125" rx="10" fill="#e9e9e9" stroke="#8b8b8b" stroke-width="4"/>
+          <path d="M167 480v125M65 542h205" stroke="#999" stroke-width="3"/>
+          <circle cx="167" cy="542" r="25" fill="none" stroke="#999" stroke-width="3"/>
+          <text x="167" y="630" text-anchor="middle" font-size="17" font-weight="700" fill="#555">CANCHAS</text>
+        </g>
+
+        <!-- edificios -->
+        <g id="buildings" filter="url(#shadow)" font-family="system-ui,Arial">
+          <g class="building" data-id="A" transform="translate(355 85)">
+            <rect width="420" height="90" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <rect width="420" height="90" rx="12" fill="none" stroke="#b98b91" stroke-width="2"/>
+            <text x="210" y="38" text-anchor="middle" font-size="28" font-weight="800" fill="#5b2630">EDIFICIO A</text>
+            <text x="210" y="64" text-anchor="middle" font-size="14" fill="#555">Administración · Biblioteca · Audiovisual</text>
+          </g>
+
+          <g class="building" data-id="B" transform="translate(820 155)">
+            <rect width="150" height="70" rx="10" fill="#fff" stroke="#5b2630" stroke-width="4"/>
+            <text x="75" y="30" text-anchor="middle" font-size="24" font-weight="800" fill="#5b2630">B</text>
+            <text x="75" y="52" text-anchor="middle" font-size="13" fill="#555">Aula B1</text>
+          </g>
+
+          <g class="building" data-id="C" transform="translate(790 285)">
+            <rect width="220" height="90" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="110" y="38" text-anchor="middle" font-size="28" font-weight="800" fill="#5b2630">EDIFICIO C</text>
+            <text x="110" y="65" text-anchor="middle" font-size="14" fill="#555">Química · CAED · Aulas C2–C5</text>
+          </g>
+
+          <g class="building" data-id="D" transform="translate(610 405)">
+            <rect width="300" height="105" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="150" y="40" text-anchor="middle" font-size="28" font-weight="800" fill="#5b2630">EDIFICIO D</text>
+            <text x="150" y="68" text-anchor="middle" font-size="14" fill="#555">Cómputo · Enfermería · Becas</text>
+            <text x="150" y="88" text-anchor="middle" font-size="12" fill="#777">Electrónica II · Tutorías · Orientación · D4–D5</text>
+          </g>
+
+          <g class="building" data-id="E" transform="translate(345 390)">
+            <rect width="220" height="85" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="110" y="36" text-anchor="middle" font-size="28" font-weight="800" fill="#5b2630">EDIFICIO E</text>
+            <text x="110" y="63" text-anchor="middle" font-size="14" fill="#555">Aulas E1–E6</text>
+          </g>
+
+          <g class="building" data-id="F" transform="translate(100 335)">
+            <rect width="180" height="75" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="90" y="31" text-anchor="middle" font-size="26" font-weight="800" fill="#5b2630">EDIFICIO F</text>
+            <text x="90" y="56" text-anchor="middle" font-size="13" fill="#555">Maestros · Física</text>
+          </g>
+
+          <g class="building" data-id="G" transform="translate(345 535)">
+            <rect width="330" height="115" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="165" y="40" text-anchor="middle" font-size="28" font-weight="800" fill="#5b2630">EDIFICIO G</text>
+            <text x="165" y="67" text-anchor="middle" font-size="14" fill="#555">⚡ Electricidad · Medios y Métodos</text>
+            <text x="165" y="89" text-anchor="middle" font-size="13" fill="#777">Cómputo II · Academia de Investigación</text>
+          </g>
+
+          <g class="building" data-id="H" transform="translate(75 120)">
+            <rect width="170" height="75" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="85" y="31" text-anchor="middle" font-size="26" font-weight="800" fill="#5b2630">H</text>
+            <text x="85" y="56" text-anchor="middle" font-size="13" fill="#555">Electrónica I</text>
+          </g>
+
+          <g class="building" data-id="I" transform="translate(95 675)">
+            <rect width="190" height="75" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="95" y="31" text-anchor="middle" font-size="26" font-weight="800" fill="#5b2630">I</text>
+            <text x="95" y="56" text-anchor="middle" font-size="13" fill="#555">Aulas I1–I3</text>
+          </g>
+
+          <g class="building" data-id="J" transform="translate(80 230)">
+            <rect width="165" height="75" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="82" y="31" text-anchor="middle" font-size="26" font-weight="800" fill="#5b2630">J</text>
+            <text x="82" y="56" text-anchor="middle" font-size="13" fill="#555">Aula J1</text>
+          </g>
+
+          <g class="building" data-id="K" transform="translate(735 570)">
+            <rect width="175" height="75" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="87" y="31" text-anchor="middle" font-size="26" font-weight="800" fill="#5b2630">K</text>
+            <text x="87" y="56" text-anchor="middle" font-size="13" fill="#555">Aulas K1–K2</text>
+          </g>
+
+          <g class="building" data-id="L" transform="translate(760 675)">
+            <rect width="250" height="75" rx="12" fill="#fff" stroke="#5b2630" stroke-width="5"/>
+            <text x="125" y="31" text-anchor="middle" font-size="26" font-weight="800" fill="#5b2630">L</text>
+            <text x="125" y="56" text-anchor="middle" font-size="13" fill="#555">Aulas L1–L4</text>
+          </g>
+        </g>
+
+        <!-- entrada -->
+        <g id="entrance" filter="url(#shadow)">
+          <path d="M1020 770 L1120 770 L1120 825 L1020 825 Z" fill="#5b2630"/>
+          <text x="1070" y="795" text-anchor="middle" font-size="20" font-weight="800" fill="#fff">🚪 ENTRADA</text>
+          <text x="1070" y="814" text-anchor="middle" font-size="11" fill="#fff">Vigilancia · Prefectura</text>
+        </g>
+
+        <g id="routeLayer" pointer-events="none"></g>
+        <g id="selectedPin" pointer-events="none"></g>
+      </svg>
+
+      <div class="controls">
+        <button id="plus" title="Acercar">+</button>
+        <button id="minus" title="Alejar">−</button>
+        <button id="home" title="Vista inicial">⌂</button>
+      </div>
+      <div class="searchresults" id="results"></div>
+    </div>
+    <div class="legend">
+      <span>🏫 Edificios</span><span>🚪 Entrada principal</span><span>🏀 Canchas</span><span>🧭 Ruta desde la entrada</span>
+    </div>
+  </div>
+
+  <div class="card info" id="info">
+    <h2>Selecciona un edificio</h2>
+    <p>Toca cualquier edificio del mapa para ver qué hay dentro.</p>
+    <p class="small">El plano es una versión interactiva basada en la señalización del plantel. Conviene verificar cualquier cambio de aulas o áreas antes de publicar la versión final del manual.</p>
+  </div>
+</main>
+
+<script>
+const data = {
+ A:{name:"Edificio A", areas:["Biblioteca","Servicio docente","Sala audiovisual","Bodega de danza","Planta agua potable","Dirección","Subdirección académica","Subdirección administrativa","Control escolar","Servicios / Recursos Humanos","Contraloría","Vinculación","Planeación","Servicio social","Titulación","Recursos materiales","A.C. de Padres de Familia"]},
+ B:{name:"Edificio B", areas:["Aula B1","Oficinas UEMSTIS","Baños"]},
+ C:{name:"Edificio C", areas:["Laboratorio de Química","CAED","Baños","Aulas C2, C3, C4 y C5"]},
+ D:{name:"Edificio D", areas:["Centro de cómputo","Oficina centro de cómputo","SNTE D-11-72","Aula D1","Enfermería","Becas","Taller de Electrónica II","Tutorías / Construye-T","Orientación educativa","Tutoría matutina / vespertina","Aulas D4 y D5"]},
+ E:{name:"Edificio E", areas:["Aulas E1, E2 y E3","Aulas E4, E5 y E6"]},
+ F:{name:"Edificio F", areas:["Sala de maestros","Laboratorio de Física"]},
+ G:{name:"Edificio G", areas:["Taller de Electricidad","Oficina de Medios y Métodos","Centro de Cómputo II","Academia de Investigación"]},
+ H:{name:"Edificio H", areas:["Taller de Electrónica I"]},
+ I:{name:"Edificio I", areas:["Aulas I1, I2 y I3"]},
+ J:{name:"Edificio J", areas:["Aula J1"]},
+ K:{name:"Edificio K", areas:["Aulas K-1, K-2 y K-1 (según señalización fotografiada)"]},
+ L:{name:"Edificio L", areas:["Aulas L-1, L-2, L-3 y L-4"]},
+ entrada:{name:"Entrada principal", areas:["Vigilancia","Prefectura"]}
+};
+
+// Posiciones aproximadas del centro de cada edificio en el plano SVG
+const centers={
+ A:[565,130],B:[895,190],C:[900,330],D:[760,457],E:[455,432],F:[190,372],
+ G:[510,592],H:[160,158],I:[190,712],J:[162,268],K:[822,607],L:[885,712],entrada:[1070,800]
+};
+
+// Rutas esquemáticas desde la entrada a cada edificio.
+const routeMid=[1045,735,930,650,820,560,700,470,600,380,520,300,450,220];
+const routes={};
+Object.keys(centers).forEach(id=>{
+ if(id==="entrada") return;
+ const [x,y]=centers[id];
+ const pts=[[1070,800],[1010,735],[900,690],[800,620],[700,560],[600,480],[520,400],[430,320],[350,250],[x,y]];
+ // simplificar/ajustar la ruta al destino
+ routes[id]=pts;
+});
+
+const svg=document.getElementById("map"), wrap=document.getElementById("mapwrap");
+const info=document.getElementById("info"), results=document.getElementById("results");
+let scale=1, tx=0, ty=0, dragging=false, sx=0, sy=0, stx=0, sty=0, selected=null;
+
+function setView(){
+ svg.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`;
+ svg.style.transformOrigin="0 0";
+}
+function resetView(){scale=1;tx=0;ty=0;setView();}
+
+function showInfo(id){
+ const d=data[id];
+ if(!d)return;
+ selected=id;
+ info.innerHTML=`<h2>${d.name}</h2><p><b>¿Qué hay aquí?</b></p><div class="tags">${d.areas.map(a=>`<span class="tag">${a}</span>`).join("")}</div>`;
+ document.querySelectorAll(".building rect").forEach(r=>r.style.strokeWidth="5");
+ const g=document.querySelector(`.building[data-id="${id}"]`);
+ if(g) g.querySelector("rect").style.strokeWidth="9";
+}
+
+function drawPin(id){
+ const layer=document.getElementById("selectedPin"); layer.innerHTML="";
+ const [x,y]=centers[id];
+ layer.innerHTML=`<g transform="translate(${x},${y-62})">
+ <path d="M0 0 C-20 0 -28 16 -28 31 C-28 54 0 78 0 78 C0 78 28 54 28 31 C28 16 20 0 0 0Z" fill="#7b3945" stroke="#fff" stroke-width="5"/>
+ <circle cx="0" cy="30" r="9" fill="#fff"/>
+ </g>`;
+}
+function drawRoute(id){
+ const layer=document.getElementById("routeLayer"); layer.innerHTML="";
+ if(!id || id==="entrada") return;
+ const pts=routes[id];
+ layer.innerHTML=`<polyline points="${pts.map(p=>p.join(",")).join(" ")}" fill="none" stroke="#7b3945" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity=".28"/>
+ <polyline points="${pts.map(p=>p.join(",")).join(" ")}" fill="none" stroke="#7b3945" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 8"/>
+ <circle cx="1070" cy="800" r="13" fill="#fff" stroke="#7b3945" stroke-width="5"/>
+ <text x="1070" y="775" text-anchor="middle" font-size="16" font-weight="800" fill="#7b3945">INICIO</text>`;
+}
+function select(id){
+ showInfo(id); drawPin(id);
+}
+document.querySelectorAll(".building").forEach(g=>{
+ g.addEventListener("click",e=>{e.stopPropagation();select(g.dataset.id);});
+});
+document.getElementById("entrance").addEventListener("click",e=>{e.stopPropagation();select("entrada")});
+document.getElementById("routeBtn").addEventListener("click",()=>{
+ if(!selected || selected==="entrada"){alert("Primero selecciona un edificio.");return;}
+ drawRoute(selected);
+});
+document.getElementById("reset").addEventListener("click",()=>{selected=null;document.getElementById("routeLayer").innerHTML="";document.getElementById("selectedPin").innerHTML="";resetView();info.innerHTML='<h2>Selecciona un edificio</h2><p>Toca cualquier edificio del mapa para ver qué hay dentro.</p><p class="small">El plano es una versión interactiva basada en la señalización del plantel. Conviene verificar cualquier cambio de aulas o áreas antes de publicar la versión final del manual.</p>';});
+document.getElementById("plus").addEventListener("click",()=>{scale=Math.min(2.4,scale*1.2);setView()});
+document.getElementById("minus").addEventListener("click",()=>{scale=Math.max(.65,scale/1.2);setView()});
+document.getElementById("home").addEventListener("click",resetView);
+
+wrap.addEventListener("pointerdown",e=>{dragging=true;sx=e.clientX;sy=e.clientY;stx=tx;sty=ty;svg.classList.add("dragging");wrap.setPointerCapture(e.pointerId)});
+wrap.addEventListener("pointermove",e=>{if(!dragging)return;tx=stx+(e.clientX-sx);ty=sty+(e.clientY-sy);setView()});
+wrap.addEventListener("pointerup",()=>{dragging=false;svg.classList.remove("dragging")});
+wrap.addEventListener("pointercancel",()=>{dragging=false;svg.classList.remove("dragging")});
+wrap.addEventListener("wheel",e=>{e.preventDefault();scale=Math.max(.65,Math.min(2.4,scale*(e.deltaY<0?1.1:.9)));setView()},{passive:false});
+
+const search=document.getElementById("search");
+search.addEventListener("input",()=>{
+ const q=search.value.trim().toLowerCase();
+ results.innerHTML="";
+ if(!q){results.style.display="none";return;}
+ const matches=[];
+ for(const [id,d] of Object.entries(data)){
+   const hay=(d.name+" "+d.areas.join(" ")).toLowerCase();
+   if(hay.includes(q)) matches.push([id,d]);
+ }
+ if(!matches.length){results.innerHTML='<div class="result">No se encontró esa instalación.</div>';results.style.display="block";return;}
+ results.innerHTML=matches.map(([id,d])=>`<div class="result" data-result="${id}"><b>${d.name}</b><br><span class="small">${d.areas.slice(0,3).join(" · ")}</span></div>`).join("");
+ results.style.display="block";
+ results.querySelectorAll("[data-result]").forEach(el=>el.addEventListener("click",()=>{
+   const id=el.dataset.result; select(id); results.style.display="none"; search.value=data[id].name;
+   const [x,y]=centers[id];
+   scale=1.35; tx=wrap.clientWidth/2-x*scale; ty=wrap.clientHeight/2-y*scale; setView();
+ }));
+});
+document.addEventListener("click",e=>{if(!e.target.closest(".toolbar")&&!e.target.closest(".searchresults"))results.style.display="none"});
+setView();
+</script>
+</body>
+</html>
