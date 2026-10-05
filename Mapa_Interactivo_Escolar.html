@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa Interactivo del Campus</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            overscroll-behavior: none;
+            background-color: #030712;
+            color: #f3f4f6;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #030712; }
+        ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #374151; }
+
+        /* Hardware acceleration to completely eliminate jitter/tremor on pan */
+        #campusCanvas {
+            will-change: transform;
+            backface-visibility: hidden;
+            transform: translateZ(0);
+            transform-origin: 0 0;
+        }
+
+        .map-card {
+            will-change: transform, box-shadow;
+            backface-visibility: hidden;
+            transform: translateZ(0);
+            transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        @keyframes pulse-beacon {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1.04); box-shadow: 0 0 0 16px rgba(16, 185, 129, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .beacon-pulse {
+            animation: pulse-beacon 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col overflow-hidden">
+
+    <header class="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center justify-between shadow-xl z-30 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="bg-blue-600 p-2.5 rounded-xl text-white shadow-lg shadow-blue-500/20">
+                <i class="fa-solid fa-map-location-dot text-lg"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-sm sm:text-base tracking-tight flex items-center gap-2">
+                    Campus Maps <span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30">Oficial</span>
+                </h1>
+                <p class="text-xs text-gray-400 hidden sm:block">Guía interactiva y directorio académico detallado</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2">
+            <button onclick="toggleSidebar()" class="md:hidden bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 border border-gray-700 text-gray-200">
+                <i class="fa-solid fa-bars text-blue-400"></i>
+                <span>Directorio</span>
+            </button>
+            <button onclick="resetMapTransform()" class="bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 text-gray-200 border border-gray-700">
+                <i class="fa-solid fa-compass text-emerald-400"></i>
+                <span class="hidden sm:inline">Centrar Mapa</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex-1 flex flex-col md:flex-row relative overflow-hidden">
+
+        <div id="sidebar" class="absolute md:relative inset-y-0 left-0 z-30 w-88 md:w-96 lg:w-[420px] bg-gray-900/98 md:bg-gray-900 backdrop-blur-md border-r border-gray-800 flex flex-col transform -translate-x-full md:translate-x-0 transition-transform duration-300 shadow-2xl md:shadow-none shrink-0">
+            
+            <div class="p-4 border-b border-gray-800 space-y-3 shrink-0">
+                <div class="flex items-center justify-between">
+                    <h2 class="font-bold text-sm text-gray-200 flex items-center gap-2">
+                        <i class="fa-solid fa-building-columns text-blue-400"></i> Directorio del Campus (A - L)
+                    </h2>
+                    <button onclick="toggleSidebar()" class="md:hidden text-gray-400 hover:text-white p-1">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+                
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                        <i class="fa-solid fa-magnifying-glass text-xs"></i>
+                    </span>
+                    <input type="text" id="searchInput" oninput="handleSearch(this.value)" placeholder="Buscar aulas, laboratorios, biblioteca, becas..." class="w-full pl-9 pr-8 py-2.5 bg-gray-950 border border-gray-800 rounded-xl text-xs text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition">
+                    <button id="clearSearch" onclick="clearSearchInput()" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-200 hidden">
+                        <i class="fa-solid fa-circle-xmark text-xs"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Panel de navegación GPS activo -->
+            <div id="routeInfoPanel" class="hidden bg-gradient-to-br from-blue-950/90 to-indigo-950/90 border-b border-blue-500/40 p-4 shrink-0 transition-all shadow-inner">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <span class="text-[10px] uppercase tracking-wider text-blue-400 font-extrabold flex items-center gap-1">
+                            <i class="fa-solid fa-route"></i> Guía de Ruta GPS Activa
+                        </span>
+                        <h3 id="activeDestTitle" class="font-bold text-white text-sm mt-0.5">Destino Seleccionado</h3>
+                    </div>
+                    <button onclick="clearRoute()" class="text-gray-400 hover:text-white bg-gray-950/80 px-2.5 py-1 rounded-lg text-[11px] border border-gray-700/80 transition">
+                        <i class="fa-solid fa-xmark mr-1"></i> Cerrar
+                    </button>
+                </div>
+                <div class="mt-2.5 bg-gray-950/90 rounded-xl p-3 border border-gray-800">
+                    <p class="text-[11px] font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                        <i class="fa-solid fa-shoe-prints text-emerald-400"></i> Desde Entrada Principal ("AQUÍ ESTOY"):
+                    </p>
+                    <ol id="routeStepsList" class="space-y-1 text-[11px] text-gray-300 pl-4 list-decimal">
+                        <!-- Pasos dinámicos -->
+                    </ol>
+                </div>
+            </div>
+
+            <!-- Lista de elementos del directorio -->
+            <div id="directoryList" class="flex-1 overflow-y-auto p-4 space-y-3">
+                <!-- Se llena mediante JS -->
+            </div>
+        </div>
+
+        <div id="sidebarBackdrop" onclick="toggleSidebar()" class="absolute inset-0 bg-black/60 z-20 hidden md:hidden backdrop-blur-sm transition-opacity"></div>
+
+        <div class="flex-1 relative bg-gray-950 flex flex-col overflow-hidden">
+            
+            <!-- Controles flotantes de Zoom -->
+            <div class="absolute top-4 right-4 z-20 flex flex-col space-y-1.5 bg-gray-900/90 backdrop-blur-md p-1.5 rounded-2xl border border-gray-800 shadow-2xl">
+                <button onclick="zoomIn()" class="p-2.5 text-gray-300 hover:text-white hover:bg-gray-800 rounded-xl transition" title="Acercar">
+                    <i class="fa-solid fa-plus text-xs"></i>
+                </button>
+                <div class="h-[1px] bg-gray-800 mx-1"></div>
+                <button onclick="zoomOut()" class="p-2.5 text-gray-300 hover:text-white hover:bg-gray-800 rounded-xl transition" title="Alejar">
+                    <i class="fa-solid fa-minus text-xs"></i>
+                </button>
+                <div class="h-[1px] bg-gray-800 mx-1"></div>
+                <button onclick="resetMapTransform()" class="p-2.5 text-gray-300 hover:text-white hover:bg-gray-800 rounded-xl transition" title="Restablecer vista">
+                    <i class="fa-solid fa-expand text-xs"></i>
+                </button>
+            </div>
+
+            <!-- Rosa de los vientos (Esquina superior izquierda) -->
+            <div class="absolute top-4 left-4 z-20 bg-gray-900/90 backdrop-blur-md px-3 py-2 rounded-2xl border border-gray-800 shadow-2xl flex items-center space-x-2.5 text-xs font-semibold text-gray-300">
+                <div class="w-8 h-8 rounded-xl bg-gray-950 flex items-center justify-center text-amber-400 border border-gray-800 shadow-inner">
+                    <i class="fa-solid fa-compass text-base animate-spin" style="animation-duration: 25s;"></i>
+                </div>
+                <div>
+                    <span class="block text-[9px] text-gray-400 uppercase tracking-widest font-extrabold">Rosa de los Vientos</span>
+                    <span class="text-xs text-gray-200">Norte &#8226; Sur &#8226; Este &#8226; Oeste</span>
+                </div>
+            </div>
+
+            <div id="mapViewport" class="flex-1 relative overflow-auto cursor-grab active:cursor-grabbing flex items-center justify-center p-8 select-none">
+                
+                <div id="campusCanvas" class="relative w-[1800px] h-[1600px] bg-gray-900/20 rounded-3xl border border-gray-800/60 shadow-2xl origin-top-left">
+                    
+                    <!-- Capa SVG para el trazado de rutas -->
+                    <svg class="absolute inset-0 w-full h-full pointer-events-none z-10" id="routeSvg">
+                        <path id="routePathLine" d="" fill="none" stroke="#3b82f6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" class="transition-all duration-700 drop-shadow-[0_0_12px_rgba(59,130,246,0.9)]" stroke-dasharray="12 6" />
+                    </svg>
+
+                    <!-- Calles y caminos de referencia -->
+                    <div class="absolute inset-0 pointer-events-none opacity-20">
+                        <div class="absolute top-[400px] left-0 right-0 h-24 bg-gray-800/50 border-y border-gray-700/60"></div>
+                        <div class="absolute top-[950px] left-0 right-0 h-28 bg-gray-800/50 border-y border-gray-700/60"></div>
+                        <div class="absolute top-0 bottom-0 left-[550px] w-28 bg-gray-800/50 border-x border-gray-700/60"></div>
+                        <div class="absolute top-0 bottom-0 left-[1250px] w-28 bg-gray-800/50 border-x border-gray-700/60"></div>
+                    </div>
+
+
+                    <div id="marker-entrance" onclick="selectEntrance()" class="absolute bottom-32 left-32 z-20 flex flex-col items-center cursor-pointer group">
+                        <div class="bg-emerald-500 text-gray-950 px-3.5 py-1.5 rounded-full text-xs font-black shadow-xl flex items-center space-x-1.5 animate-bounce mb-1.5 border-2 border-emerald-300">
+                            <i class="fa-solid fa-location-crosshairs text-sm"></i>
+                            <span>¡AQUÍ ESTOY! (Entrada)</span>
+                        </div>
+                        <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 border-2 border-white shadow-2xl flex items-center justify-center text-white beacon-pulse group-hover:scale-110 transition-transform">
+                            <i class="fa-solid fa-door-open text-2xl"></i>
+                        </div>
+                        <span class="text-xs font-bold text-emerald-400 mt-1.5 bg-gray-950/95 px-3.5 py-1 rounded-lg border border-gray-800 shadow">Vigilancia y Prefectura</span>
+                    </div>
+
+                    <div id="building-canchas1" onclick="selectBuilding('canchas1')" class="absolute top-28 left-36 w-96 h-56 bg-gray-900/90 hover:bg-gray-800/95 border-2 border-gray-700 rounded-3xl p-4 cursor-pointer transition shadow-xl flex flex-col items-center justify-center group map-card">
+                        <div class="absolute top-3 left-4 bg-gray-950 text-orange-400 text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-800 flex items-center gap-1.5">
+                            <i class="fa-solid fa-basketball"></i> Cancha Deportiva Principal
+                        </div>
+                        <div class="w-full h-full border-2 border-orange-400/40 rounded-2xl flex items-center justify-center relative mt-4 opacity-90 group-hover:opacity-100">
+                            <div class="w-20 h-20 rounded-full border-2 border-orange-400/40"></div>
+                            <div class="absolute inset-y-0 left-1/2 w-0.5 bg-orange-400/40"></div>
+                        </div>
+                    </div>
+
+                    <div id="building-canchas2" onclick="selectBuilding('canchas2')" class="absolute top-36 right-36 w-80 h-80 bg-gray-900/90 hover:bg-gray-800/95 border-2 border-gray-700 rounded-3xl p-4 cursor-pointer transition shadow-xl flex flex-col items-center justify-center group map-card">
+                        <div class="absolute top-3 left-4 bg-gray-950 text-orange-400 text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-800 flex items-center gap-1.5">
+                            <i class="fa-solid fa-futbol"></i> Zona Polideportiva (4 Canchas)
+                        </div>
+                        <div class="w-full h-full grid grid-cols-2 gap-2 opacity-90 group-hover:opacity-100 mt-4">
+                            <div class="border border-orange-400/40 rounded-xl flex items-center justify-center"><div class="w-8 h-8 rounded-full border border-orange-400/40"></div></div>
+                            <div class="border border-orange-400/40 rounded-xl flex items-center justify-center"><div class="w-8 h-8 rounded-full border border-orange-400/40"></div></div>
+                            <div class="border border-orange-400/40 rounded-xl flex items-center justify-center"><div class="w-8 h-8 rounded-full border border-orange-400/40"></div></div>
+                            <div class="border border-orange-400/40 rounded-xl flex items-center justify-center"><div class="w-8 h-8 rounded-full border border-orange-400/40"></div></div>
+                        </div>
+                    </div>
+
+                    <div id="building-A" onclick="selectBuilding('A')" class="absolute bottom-60 left-88 w-68 h-68 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-3xl p-4 cursor-pointer transition shadow-2xl flex flex-col justify-between group map-card">
+                        <div class="flex items-center justify-between">
+                            <span class="w-10 h-10 rounded-2xl bg-blue-600 text-white font-bold text-sm flex items-center justify-center shadow">A</span>
+                            <span class="text-xs text-blue-400 font-semibold bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20">Biblioteca / Admisión</span>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-base text-white">EDIFICIO A</h4>
+                            <p class="text-xs text-gray-300 mt-1">Planta Baja: Biblioteca, Delegación, Sala Maestros</p>
+                            <p class="text-xs text-gray-400">Planta Alta: Idiomas, Control Escolar, Cómputo</p>
+                        </div>
+                    </div>
+
+                    <div id="building-B" onclick="selectBuilding('B')" class="absolute top-[680px] right-36 w-64 h-36 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex items-center justify-between group map-card">
+                        <div class="flex items-center space-x-3">
+                            <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">B</span>
+                            <div>
+                                <h4 class="font-bold text-sm text-white">EDIFICIO B</h4>
+                                <p class="text-xs text-gray-400">Contaduría & Aulas BTIER</p>
+                            </div>
+                        </div>
+                        <i class="fa-solid fa-chevron-right text-gray-500 text-xs"></i>
+                    </div>
+
+                    <div id="building-C" onclick="selectBuilding('C')" class="absolute bottom-[560px] left-88 w-64 h-48 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex flex-col justify-between group map-card">
+                        <div class="flex items-center justify-between">
+                            <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">C</span>
+                            <span class="text-xs text-blue-400 font-semibold">Lab Química</span>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-sm text-white">EDIFICIO C</h4>
+                            <p class="text-xs text-gray-300">Lab. Química, CAED, Baños y Aulas</p>
+                        </div>
+                    </div>
+
+                    <div id="building-D" onclick="selectBuilding('D')" class="absolute top-[420px] left-88 w-64 h-64 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex flex-col justify-between group map-card">
+                        <div class="flex items-center justify-between">
+                            <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">D</span>
+                            <span class="text-xs text-blue-400 font-semibold">Cómputo / Becas</span>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-sm text-white">EDIFICIO D</h4>
+                            <p class="text-xs text-gray-300">Centro de Cómputo, Enfermería, Becas</p>
+                        </div>
+                    </div>
+
+                    <div id="building-E" onclick="selectBuilding('E')" class="absolute bottom-52 right-44 w-64 h-36 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex items-center justify-between group map-card">
+                        <div class="flex items-center space-x-3">
+                            <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">E</span>
+                            <div>
+                                <h4 class="font-bold text-sm text-white">EDIFICIO E</h4>
+                                <p class="text-xs text-gray-400">Aulas E1, E2, EA y ES</p>
+                            </div>
+                        </div>
+                        <i class="fa-solid fa-chevron-right text-gray-500 text-xs"></i>
+                    </div>
+
+                    <div id="building-F" onclick="selectBuilding('F')" class="absolute top-[780px] right-44 w-64 h-36 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex items-center justify-between group map-card">
+                        <div class="flex items-center space-x-3">
+                            <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">F</span>
+                            <div>
+                                <h4 class="font-bold text-sm text-white">EDIFICIO F</h4>
+                                <p class="text-xs text-gray-400">Sala Maestros / Lab. Fotografía</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="building-G" onclick="selectBuilding('G')" class="absolute top-[350px] left-[720px] w-88 h-76 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-3xl p-5 cursor-pointer transition shadow-2xl flex flex-col justify-between group map-card">
+                        <div class="flex items-center justify-between">
+                            <span class="w-10 h-10 rounded-2xl bg-blue-600 text-white font-bold text-sm flex items-center justify-center shadow">G</span>
+                            <span class="text-xs text-blue-400 font-semibold bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20">Taller Eléctrico</span>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-base text-white">EDIFICIO G</h4>
+                            <p class="text-xs text-gray-300 mt-1">Taller Electricidad & Of. Medios y Métodos</p>
+                            <p class="text-xs text-gray-400">Centro de Cómputo II & Investigación</p>
+                        </div>
+                    </div>
+
+                    <div id="building-H" onclick="selectBuilding('H')" class="absolute bottom-32 right-44 w-64 h-36 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex items-center space-x-3 group map-card">
+                        <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">H</span>
+                        <div>
+                            <h4 class="font-bold text-sm text-white">EDIFICIO H</h4>
+                            <p class="text-xs text-gray-400">Taller de Electrónica I</p>
+                        </div>
+                    </div>
+
+                    <div id="building-I" onclick="selectBuilding('I')" class="absolute top-32 right-[540px] w-64 h-36 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex items-center space-x-3 group map-card">
+                        <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">I</span>
+                        <div>
+                            <h4 class="font-bold text-sm text-white">EDIFICIO I</h4>
+                            <p class="text-xs text-gray-400">Aulas I1, I2 y I3</p>
+                        </div>
+                    </div>
+
+                    <div id="building-J" onclick="selectBuilding('J')" class="absolute bottom-[380px] right-44 w-64 h-36 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex items-center space-x-3 group map-card">
+                        <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">J</span>
+                        <div>
+                            <h4 class="font-bold text-sm text-white">EDIFICIO J</h4>
+                            <p class="text-xs text-gray-400">Aulas J1 & Tutorías</p>
+                        </div>
+                    </div>
+
+                    <div id="building-K" onclick="selectBuilding('K')" class="absolute top-[300px] left-[750px] w-56 h-28 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-3.5 cursor-pointer transition shadow-xl flex items-center space-x-3 group map-card">
+                        <span class="w-8 h-8 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">K</span>
+                        <div>
+                            <h4 class="font-bold text-xs text-white">EDIFICIO K</h4>
+                            <p class="text-[11px] text-gray-400">Aulas K-1 y K-2</p>
+                        </div>
+                    </div>
+
+                    <div id="building-L" onclick="selectBuilding('L')" class="absolute top-32 left-[680px] w-68 h-36 bg-gray-900/95 hover:bg-blue-950/70 border-2 border-gray-700 hover:border-blue-500 rounded-2xl p-4 cursor-pointer transition shadow-xl flex items-center space-x-3 group map-card">
+                        <span class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center">L</span>
+                        <div>
+                            <h4 class="font-bold text-sm text-white">EDIFICIO L</h4>
+                            <p class="text-xs text-gray-400">Aulas L.1, L.2, L.3 y L.4</p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="bg-gray-900/95 border-t border-gray-800 px-6 py-2.5 text-xs text-gray-400 flex flex-col sm:flex-row items-center justify-between z-20 shrink-0">
+                <p><i class="fa-solid fa-circle-info text-blue-400 mr-1.5"></i> Haz clic en cualquier edificio o búscalo en el panel para trazar la ruta exacta desde la Entrada Principal.</p>
+                <p class="mt-1 sm:mt-0 font-medium text-gray-300">Campus Central &bull; Sistema de Geonavegación</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const campusData = {
+            'A': {
+                name: 'EDIFICIO A',
+                type: 'Edificio Académico y Administrativo',
+                coords: { x: 440, y: 1320 },
+                plantaBaja: ['Biblioteca', 'Delegación Sindical', 'Sala de Maestros', 'Secretaría', 'Vigilancia / Prefectura'],
+                plantaAlta: ['Áreas Administrativas', 'Laboratorio de Idiomas', 'Laboratorio de Computación', 'Control Escolar', 'Servicios Escolares'],
+                description: 'Centro principal administrativo, biblioteca central y laboratorios de idiomas.'
+            },
+            'B': {
+                name: 'EDIFICIO B',
+                type: 'Edificio Académico y Contaduría',
+                coords: { x: 1450, y: 740 },
+                plantaBaja: ['Biblioteca', 'Acceso Edificio', 'Salón de Conferencias', 'Sala de Juntas', 'Área de Fotocopiado'],
+                plantaAlta: ['Planta Alta', 'Aulas de Clase', 'Seminarios', 'Sala BTIER', 'Cubículos de Asesoría', 'Contaduría'],
+                description: 'Salones de clase, salas de juntas y áreas de contaduría.'
+            },
+            'C': {
+                name: 'EDIFICIO C',
+                type: 'Edificio de Laboratorios de Química',
+                coords: { x: 440, y: 980 },
+                plantaBaja: ['Laboratorio de Química', 'CAED', 'Baños', 'Oficinas Administrativas'],
+                plantaAlta: ['Aulas C1, C2, C3 y C5', 'Laboratorio Auxiliar'],
+                description: 'Laboratorios de ciencias experimentales y aulas C.'
+            },
+            'D': {
+                name: 'EDIFICIO D',
+                type: 'Centro de Cómputo y Servicios',
+                coords: { x: 440, y: 560 },
+                plantaBaja: ['Centro de Cómputo', 'Oficina Centro de Cómputo', 'Área de Control', 'Enfermería', 'Becas'],
+                plantaAlta: ['Taller de Cómputo II', 'Asesorías y Consultas', 'Idiomas', 'Doctora / Psicología', 'Aulas D1 y D2'],
+                description: 'Centro tecnológico, cómputo principal, enfermería y atención a becas.'
+            },
+            'E': {
+                name: 'EDIFICIO E',
+                type: 'Edificio Académico',
+                coords: { x: 1450, y: 1380 },
+                plantaBaja: ['Aulas E1 y E2', 'Área de Descanso'],
+                plantaAlta: ['Aulas EA y ES', 'Laboratorio auxiliar'],
+                description: 'Aulas generales y áreas de descanso.'
+            },
+            'F': {
+                name: 'EDIFICIO F',
+                type: 'Edificio de Profesores y Aulas',
+                coords: { x: 1450, y: 940 },
+                plantaBaja: ['Aulas CT, E2 y ES', 'Sala de Maestros'],
+                plantaAlta: ['Aulas CA, ES y YS', 'Laboratorio de Fotografía'],
+                description: 'Sala de maestros y laboratorios fotográficos.'
+            },
+            'G': {
+                name: 'EDIFICIO G',
+                type: 'Edificio Tecnológico',
+                coords: { x: 880, y: 500 },
+                plantaBaja: ['Taller de Electricidad', 'Oficina de Medios y Métodos'],
+                plantaAlta: ['Centro de Cómputo II', 'Academia de Investigación'],
+                description: 'Talleres de especialidad técnica y cómputo avanzado.'
+            },
+            'H': {
+                name: 'EDIFICIO H',
+                type: 'Talleres de Electrónica',
+                coords: { x: 1450, y: 1500 },
+                plantaBaja: ['Taller de Electrónica I', 'Área de Prácticas'],
+                plantaAlta: ['Sin registro en planta alta'],
+                description: 'Talleres prácticos de electrónica y circuitos.'
+            },
+            'I': {
+                name: 'EDIFICIO I',
+                type: 'Aulas Modernas',
+                coords: { x: 1350, y: 220 },
+                plantaBaja: ['Aulas I1, I2 y I3'],
+                plantaAlta: ['Área de Estudio Grupal'],
+                description: 'Módulo moderno de aulas equipadas.'
+            },
+            'J': {
+                name: 'EDIFICIO J',
+                type: 'Aulas Académicas',
+                coords: { x: 1450, y: 1160 },
+                plantaBaja: ['Aulas J1', 'Cubículos de Profesores'],
+                plantaAlta: ['Aulas de tutorías'],
+                description: 'Espacio dedicado a tutorías y clases magistrales.'
+            },
+            'K': {
+                name: 'EDIFICIO K',
+                type: 'Módulo de Aulas K',
+                coords: { x: 900, y: 350 },
+                plantaBaja: ['Aulas K-1 y K-2'],
+                plantaAlta: ['Área auxiliar K'],
+                description: 'Salones de clase compactos.'
+            },
+            'L': {
+                name: 'EDIFICIO L',
+                type: 'Módulo Académico L',
+                coords: { x: 840, y: 200 },
+                plantaBaja: ['Aulas L.1, L.2, L.3 y L.4'],
+                plantaAlta: ['Salarios y academias'],
+                description: 'Edificio con cuatro aulas principales L.'
+            },
+            'canchas1': {
+                name: 'Cancha Deportiva Principal',
+                type: 'Zona Deportiva',
+                coords: { x: 400, y: 220 },
+                plantaBaja: ['Cancha de Basquetbol principal', 'Gradas y Cancha abierta'],
+                plantaAlta: ['Área abierta'],
+                description: 'Zona de deportes y eventos al aire libre.'
+            },
+            'canchas2': {
+                name: 'Zona Polideportiva (4 Canchas)',
+                type: 'Zona Deportiva Múltiple',
+                coords: { x: 1400, y: 350 },
+                plantaBaja: ['4 Canchas multifuncionales', 'Aros de básquetbol y volibol'],
+                plantaAlta: ['Zona libre'],
+                description: 'Complejo de canchas múltiples para torneos estudiantiles.'
+            }
+        };
+
+        let currentScale = 0.8;
+        let isDragging = false;
+        let startX, startY;
+        let translateX = 30;
+        let translateY = 30;
+
+        const viewport = document.getElementById('mapViewport');
+        const canvas = document.getElementById('campusCanvas');
+
+        window.onload = function() {
+            renderDirectory();
+            updateCanvasTransform();
+        };
+
+        function renderDirectory(filter = '') {
+            const container = document.getElementById('directoryList');
+            container.innerHTML = '';
+            const searchTerm = filter.toLowerCase();
+
+            for (const [key, b] of Object.entries(campusData)) {
+                const matches = 
+                    b.name.toLowerCase().includes(searchTerm) ||
+                    b.type.toLowerCase().includes(searchTerm) ||
+                    b.plantaBaja.some(item => item.toLowerCase().includes(searchTerm)) ||
+                    b.plantaAlta.some(item => item.toLowerCase().includes(searchTerm));
+
+                if (!matches && searchTerm !== '') continue;
+
+                const itemDiv = document.createElement('div');
+                itemDiv.className = "bg-gray-950/90 border border-gray-800 hover:border-blue-500/60 rounded-2xl p-3.5 transition shadow-sm hover:shadow-md cursor-pointer group";
+                itemDiv.onclick = () => selectBuilding(key);
+
+                itemDiv.innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center space-x-2.5">
+                            <span class="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-md">${key.length === 1 ? key : '📍'}</span>
+                            <div>
+                                <h3 class="font-bold text-xs md:text-sm text-gray-100 group-hover:text-blue-400 transition">${b.name}</h3>
+                                <p class="text-[10px] text-gray-400">${b.type}</p>
+                            </div>
+                        </div>
+                        <button class="bg-blue-600/20 text-blue-400 group-hover:bg-blue-600 group-hover:text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-1">
+                            <i class="fa-solid fa-route text-[10px]"></i>
+                            <span>Ir</span>
+                        </button>
+                    </div>
+                    <div class="text-[11px] text-gray-300 space-y-1 bg-gray-900/90 p-2.5 rounded-xl border border-gray-800">
+                        <div class="flex items-start space-x-1.5">
+                            <span class="font-semibold text-blue-400 shrink-0">Planta Baja:</span>
+                            <span class="text-gray-300">${b.plantaBaja.join(', ')}</span>
+                        </div>
+                        <div class="flex items-start space-x-1.5">
+                            <span class="font-semibold text-indigo-400 shrink-0">Planta Alta:</span>
+                            <span class="text-gray-300">${b.plantaAlta.join(', ')}</span>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(itemDiv);
+            }
+
+            if (container.children.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-10 text-gray-400">
+                        <i class="fa-solid fa-triangle-exclamation text-3xl mb-2 text-gray-500"></i>
+                        <p class="text-xs font-medium">No se encontraron resultados para "${filter}"</p>
+                        <p class="text-[11px] text-gray-500 mt-1">Intenta con otro término (ej. "laboratorio", "cómputo", "Aulas").</p>
+                    </div>
+                `;
+            }
+        }
+
+        function handleSearch(val) {
+            const clearBtn = document.getElementById('clearSearch');
+            if (val.trim().length > 0) {
+                clearBtn.classList.remove('hidden');
+            } else {
+                clearBtn.classList.add('hidden');
+            }
+            renderDirectory(val);
+        }
+
+        function clearSearchInput() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('clearSearch').classList.add('hidden');
+            renderDirectory('');
+        }
+
+        function selectEntrance() {
+            const entranceEl = document.getElementById('marker-entrance');
+            entranceEl.classList.add('scale-110');
+            setTimeout(() => entranceEl.classList.remove('scale-110'), 500);
+        }
+
+        function selectBuilding(key) {
+            const building = campusData[key];
+            if (!building) return;
+
+            document.querySelectorAll('[id^="building-"]').forEach(el => {
+                el.classList.remove('ring-4', 'ring-blue-500', 'border-blue-500');
+            });
+
+            const el = document.getElementById(`building-${key}`);
+            if (el) {
+                el.classList.add('ring-4', 'ring-blue-500', 'border-blue-500');
+            }
+
+            drawRouteTo(building);
+            showRouteInstructions(building);
+
+            if (window.innerWidth < 768) {
+                toggleSidebar();
+            }
+        }
+
+        function drawRouteTo(building) {
+            const svgPath = document.getElementById('routePathLine');
+            const startX = 240;
+            const startY = 1480;
+            const endX = building.coords.x;
+            const endY = building.coords.y;
+
+            const midX = (startX + endX) / 2;
+            const midY = (startY + endY) / 2 - 90;
+
+            const d = `M ${startX} ${startY} Q ${midX} ${midY} ${endX} ${endY}`;
+            svgPath.setAttribute('d', d);
+        }
+
+        function showRouteInstructions(building) {
+            const panel = document.getElementById('routeInfoPanel');
+            const title = document.getElementById('activeDestTitle');
+            const stepsList = document.getElementById('routeStepsList');
+
+            panel.classList.remove('hidden');
+            title.textContent = building.name + " (" + building.type + ")";
+
+            stepsList.innerHTML = `
+                <li>Sal de la <strong>Entrada Principal ("AQUÍ ESTOY")</strong> en dirección norte.</li>
+                <li>Recorre el pasillo adoquinado principal del campus.</li>
+                <li>Sigue la señalización hacia el sector correspondiente.</li>
+                <li>Llegada estimada a <strong>${building.name}</strong>. ¡Destino alcanzado!</li>
+            `;
+        }
+
+        function clearRoute() {
+            document.getElementById('routeInfoPanel').classList.add('hidden');
+            document.getElementById('routePathLine').setAttribute('d', '');
+            document.querySelectorAll('[id^="building-"]').forEach(el => {
+                el.classList.remove('ring-4', 'ring-blue-500', 'border-blue-500');
+            });
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const backdrop = document.getElementById('sidebarBackdrop');
+            sidebar.classList.toggle('-translate-x-full');
+            backdrop.classList.toggle('hidden');
+        }
+
+        function zoomIn() {
+            currentScale = Math.min(currentScale + 0.15, 1.8);
+            updateCanvasTransform();
+        }
+
+        function zoomOut() {
+            currentScale = Math.max(currentScale - 0.15, 0.4);
+            updateCanvasTransform();
+        }
+
+        function resetMapTransform() {
+            currentScale = 0.8;
+            translateX = 30;
+            translateY = 30;
+            updateCanvasTransform();
+            clearRoute();
+        }
+
+        function updateCanvasTransform() {
+            canvas.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${currentScale})`;
+        }
+
+        viewport.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX - translateX;
+            startY = e.clientY - translateY;
+            viewport.style.cursor = 'grabbing';
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            translateX = e.clientX - startX;
+            translateY = e.clientY - startY;
+            updateCanvasTransform();
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+            viewport.style.cursor = 'grab';
+        });
+
+        viewport.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                startX = e.touches[0].clientX - translateX;
+                startY = e.touches[0].clientY - translateY;
+            }
+        });
+
+        viewport.addEventListener('touchmove', (e) => {
+            if (!isDragging || e.touches.length !== 1) return;
+            translateX = e.touches[0].clientX - startX;
+            translateY = e.touches[0].clientY - startY;
+            updateCanvasTransform();
+        });
+
+        viewport.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+    </script>
+</body>
+</html>
